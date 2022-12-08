@@ -1,0 +1,24 @@
+version: '3.7'
+
+services:
+      redis:
+        image: 'redis:latest'
+        container_name: 'redis_chat'
+
+        ports:
+          - 6379:6379
+
+        environment:
+          - ALLOW_EMPTY_PASSWORD=yes
+
+      db_auth:
+        image: postgres:15.1
+        container_name: 'postgres'
+
+        ports:
+          - 5432:5432
+
+        environment:
+          - POSTGRES_DB = db
+          - POSTGRES_USER = admin
+          - POSTGRES_PASSWORD = root
