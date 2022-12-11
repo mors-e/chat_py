@@ -2,6 +2,8 @@ import websockets
 import asyncio
 import json
 
+from messages import LoginRequest, MessageRequest, OkResponse, ErrResponse
+
 WS_URL = 'ws://localhost:9090'
 
 
@@ -27,6 +29,16 @@ async def main():
     await socket.send(json.dumps(data))
     response = await socket.recv()
     print(response)
+
+    message = ''
+    while message != "end":
+        message = input("end - exit:")
+        data = {
+            "type": "message",
+            "message": message,
+        }
+        await socket.send(data, WS_URL)
+        message = input("end - exit:")
 
 if __name__ == "__main__":
     event_loop = asyncio.new_event_loop()

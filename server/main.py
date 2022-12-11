@@ -3,7 +3,7 @@ import asyncio
 import redis
 import json
 
-from server.messages import LoginRequest, MessageRequest, OkResponse, ErrResponse
+from messages import LoginRequest, MessageRequest, OkResponse, ErrResponse
 from redis_structures import Room
 
 
