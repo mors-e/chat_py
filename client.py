@@ -2,6 +2,8 @@ import websockets
 import asyncio
 import json
 
+URL = "ws://localhost:8765"
+
 
 async def connect(url):
     connected = False
@@ -23,11 +25,21 @@ async def send(data: dict, url: str):
 async def main():
     url = "ws://localhost:8765"
     data = {
-        "name": "rb_client",
+        "type": "rb_client",
         "password": "123",
     }
     await send(data, url)
 
+async def sendInput():
+    message = ''
+    while message != "e":
+        message = input("Enter message(e - end): ")
+        data = {
+            "type": "message",
+            "message": message,
+        }
+        await send(data, URL)
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(sendInput())
