@@ -2,32 +2,33 @@ import websockets
 import asyncio
 import json
 
+WS_URL = 'ws://localhost:9090'
+
 
 async def connect(url):
     connected = False
     while not connected:
         try:
-            websocket = await websockets.connect(url)
+            ws = await websockets.connect(url)
             connected = True
-            return websocket
+            return ws
         except ConnectionRefusedError:
             print("Reconnecting...")
             continue
 
 
-async def send(data: dict, url: str):
-    websocket = await connect(url)
-    await websocket.send(json.dumps(data))
-
-
 async def main():
-    url = "ws://localhost:8765"
+    socket = await connect(WS_URL)
     data = {
+        'type': 'login',
         "name": "rb_client",
         "password": "123",
     }
-    await send(data, url)
-
+    await socket.send(json.dumps(data))
+    response = await socket.recv()
+    print(response)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    event_loop = asyncio.new_event_loop()
+    event_loop.run_until_complete(main())
+    event_loop.run_forever()
