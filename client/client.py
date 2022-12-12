@@ -2,6 +2,8 @@ import websockets
 import asyncio
 import json
 
+from common.messages import MessageRequest
+
 WS_URL = 'ws://localhost:9090'
 
 
@@ -31,9 +33,11 @@ async def main():
             "type": "message",
             "text": message,
         }
-        await socket.send(data, WS_URL)
-        response = await socket.recv()
-        print(response)
+        await socket.send(json.dumps(data))
+        raw_response = await socket.recv()
+        response = json.loads(raw_response)
+
+        print(response.get('text'))
 
 
 if __name__ == "__main__":

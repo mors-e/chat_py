@@ -1,37 +1,44 @@
 import websockets
 import asyncio
-import redis
+import aioredis
 import json
 from datetime import datetime
 
 from common.messages import MessageRequest, OkResponse, ErrResponse
 from common.redis_structures import Room, Message
 
+from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
+from aioredis.errors import ConnectionClosedError as ServerConnectionClosedError
 
-redis_room = redis.Redis(host="localhost", port=6379, db=0, decode_responses=True)
-redis_room.set("123", '{"users":[], "name": "123"}')
+
+async def get_redis_pool():
+    try:
+        pool = await aioredis.create_redis_pool(
+            ('localhost', '6379'), encoding='utf-8')
+        return pool
+    except ConnectionRefusedError as e:
+        print('cannot connect to redis on:', 'localhost', '6379')
+        return None
 
 
 async def client_login(socket, path):
+    pool = await get_redis_pool()
+    if pool is None:
+        return
+
     splitted_path = path.split('?')
     room_name = splitted_path.pop(0).replace('/', '')
     name = splitted_path.pop(0).split('=').pop(1)
 
-    room = redis_room.get(room_name)
-    if room is None:
-        await socket.send(ErrResponse(error='такой пароль не существует').to_json(ensure_ascii=False))
-        return None, None
+    users = await pool.smembers(room_name)
 
-    room = Room.from_json(room)
-
-    if name in room.users:
+    if name in users:
         await socket.send(ErrResponse(error='пользователь уже в комнате').to_json(ensure_ascii=False))
         return None, None
 
-    room.users.append(name)
-    _ = redis_room.set(room_name, room.to_json())
+    await pool.sadd(room_name, name)
     await socket.send(OkResponse().to_json())
-    return name, room
+    return name, room_name
 
 
 async def new_client_connect(client_socket: websockets.WebSocketClientProtocol, path: str):
@@ -39,43 +46,63 @@ async def new_client_connect(client_socket: websockets.WebSocketClientProtocol, 
 
     if room:
         tasks = [
-            listen_room(client_socket, room.name),
-            listen_client(client_socket, room.name, name)
+            await asyncio.create_task(listen_client(client_socket, room, name)),
+            await asyncio.create_task(listen_room(client_socket, room))
         ]
 
-        errors = await asyncio.gather(*tasks, return_exceptions=True)
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.ALL_COMPLETED)
 
-        print("лох + пидор", errors)
-
-        room = redis_room.get(room.name)
-        room = Room.from_json(room)
-        room.users.remove(name)
-        _ = redis_room.set(room.name, room.to_json())
+        print("1 + 2")
 
 
-async def listen_room(socket, room_name):
-    subscriber = redis_room.pubsub()
-    subscriber.subscribed(room_name)
-    while True:
-        message = subscriber.get_message()
-        message = Message.from_json(message.get('data', '{}'))
-        await socket.send(message.to_json())
-    print('лох')
+async def listen_room(socket, room_name, name):
+    pool = await get_redis_pool()
+    connected = True
+
+    while connected and pool:
+        try:
+            messages = await pool.xread(streams=[room_name], latest_ids=['$'])
+            message = subscriber.get_message()
+            message = Message.from_json(message.get('data', '{}'))
+            await socket.send(message.to_json())
+        except [ConnectionClosedError, ConnectionClosedOK]:
+            fields = {
+                'msg': '',
+                'type': 'message',
+                'room': room_name
+            }
+            await pool.xadd(stream=room_name, fields=fields, message_id=b'*', max_len=1000)
+            ws_connected = False
+
+        except ServerConnectionClosedError:
+            print('redis server connection closed')
+            return
+
+        except ConnectionRefusedError:
+            print('redis server connection closed')
+            return
 
 
 async def listen_client(socket, room_name, name):
-    publisher = redis_room.pubsub()
-    while True:
-        raw_message = await socket.recv()
-        json_message = json.loads(raw_message)
-        match json_message.get('type', None):
-            case 'message':
-                message = MessageRequest.from_json(raw_message)
-                redis_message = Message(user=name, text=message.text, time=datetime.now())
-                _ = publisher.publish(room_name, redis_message.to_json())
-            case _:
-                await socket.send('неверный тип запроса')
-    print('пидор')
+    publisher = redis_room
+    print('2')
+    try:
+        while True:
+            raw_message = await socket.recv()
+            json_message = json.loads(raw_message)
+            match json_message.get('type', None):
+                case 'message':
+                    message = MessageRequest.from_json(raw_message)
+                    redis_message = Message(user=name, text=message.text, time=datetime.now())
+                    _ = publisher.publish(room_name, redis_message.to_json())
+                    await socket.send(redis_message.to_json())
+                case _:
+                    await socket.send('неверный тип запроса')
+    finally:
+        room = redis_room.get(room_name)
+        room = Room.from_json(room)
+        room.users.remove(name)
+        _ = redis_room.set(room.name, room.to_json())
 
 
 async def start_server():
