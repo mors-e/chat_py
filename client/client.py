@@ -1,5 +1,7 @@
 import json
 import asyncio
+
+import aioconsole
 import websockets
 
 
@@ -7,38 +9,45 @@ WS_URL = 'ws://localhost:8000/room'
 
 
 async def connect(url):
-    connected = False
-    while not connected:
+    while True:
         try:
-            ws = await websockets.connect(url)
-            connected = True
-            return ws
+            return await websockets.connect(url)
         except ConnectionRefusedError:
             print("Reconnecting...")
-            continue
+
+
+async def listen_room(ws):
+    while True:
+        raw_data = await ws.recv()
+        json_data = json.loads(raw_data)
+        await aioconsole.aprint(json_data)
+
+
+async def listen_input(ws):
+    while True:
+        text = await aioconsole.ainput()
+
+        message = json.dumps({
+            'type': 'message',
+            'text': text
+        })
+
+        await ws.send(message)
 
 
 async def main():
-    room_name = input('Введите комнату: ')
     name = input('Введите имя: ')
-    socket = await connect(f'{WS_URL}/{room_name}?name={name}')
+    room_name = input('Введите комнату: ')
 
-    ok = await socket.recv()
-    print(ok)
+    websocket = await connect(f'{WS_URL}/{room_name}?name={name}')
 
-    while True:
-        message = input()
-        data = {
-            "type": "message",
-            "text": message,
-        }
-        await socket.send(json.dumps(data))
-        raw_response = await socket.recv()
-        response = json.loads(raw_response)
-        print(response)
+    await asyncio.gather(
+        listen_room(websocket),
+        listen_input(websocket),
+    )
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     event_loop = asyncio.new_event_loop()
-    event_loop.run_until_complete(main())
-    event_loop.run_forever()
+    asyncio.set_event_loop(event_loop)
+    asyncio.run(main())

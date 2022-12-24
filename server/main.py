@@ -2,16 +2,14 @@ import asyncio
 from typing import Union
 from datetime import datetime
 
-import aioredis
 from aioredis import Redis
-from fastapi import FastAPI, WebSocket
-from starlette.websockets import WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketException
 
 from common.structures import Message
+from server.redis import get_pool
 from server.manager import ConnectionManager
+from server.messages import connected_message, disconnected_message
 
-
-REDIS_URL = 'redis://localhost:6379'
 
 app = FastAPI()
 manager = ConnectionManager()
@@ -23,52 +21,48 @@ async def room(
         room_id: str,
         name: Union[str, None] = None
 ) -> None:
-    print("room")
-    pool: Redis = await aioredis.from_url(REDIS_URL, encoding="utf-8", decode_responses=True)
-    if pool is None:
-        return
-
+    print('room')
     await manager.connect(websocket)
 
-    logged_in = False
+    appended = False
     try:
-        logged_in = await client_login(websocket, room_id, name)
-        if logged_in:
-            client_finished, room_finished = await asyncio.gather(
-                listen_client(websocket, room_id, name),
-                listen_room(websocket, room_id)
-            )
-            print(client_finished, room_finished)
-
-    except WebSocketDisconnect:
-        if logged_in:
-            hash_key = f'{room_id}_hash'
-            await pool.hdel(hash_key, name)
+        appended = await append_user_to_room(room_id, name)
+        await manager.broadcast(connected_message(name))
+        await asyncio.gather(
+            listen_client(websocket, room_id, name),
+            listen_room(websocket, room_id)
+        )
+    finally:
+        print('finally')
         await manager.disconnect(websocket)
-        await manager.broadcast(f'Client disconnected {name}')
+        if appended:
+            await remove_user_from_room(room_id, name)
 
 
-async def client_login(websocket: WebSocket, room_id: str, name: str) -> bool:
-    print("login")
-    pool: Redis = await aioredis.from_url(REDIS_URL, encoding="utf-8", decode_responses=True)
-    if pool is None:
-        return False
+async def append_user_to_room(room_id: str, name: str):
+    print('append')
+    pool: Redis = await get_pool()
 
     hash_key = f'{room_id}_hash'
     users = await pool.smembers(hash_key)
-
     if name in users:
-        await manager.send_personal_message('Пользователь с таким именем уже находится в этой комнате.', websocket)
-        return False
-
+        raise WebSocketException(code=1010, reason='Пользователь с таким именем уже находится в комнате')
     await pool.sadd(hash_key, name)
-    await manager.send_personal_message('Вы вошли в чат!', websocket)
     return True
 
 
+async def remove_user_from_room(room_id: str, name: str):
+    print('remove')
+    pool: Redis = await get_pool()
+
+    hash_key = f'{room_id}_hash'
+    await pool.srem(hash_key, name)
+    await manager.broadcast(disconnected_message(name))
+
+
 async def listen_room(websocket: WebSocket, room_id):
-    print("room")
-    pool: Redis = await aioredis.from_url(REDIS_URL, encoding="utf-8", decode_responses=True)
+    print('listen_room')
+    pool: Redis = await get_pool()
 
     stream_key = f'{room_id}_stream'
     index = 0
@@ -81,12 +75,10 @@ async def listen_room(websocket: WebSocket, room_id):
                 if message:
                     await websocket.send_text(message)
 
-    return 'Ok'
-
 
 async def listen_client(websocket: WebSocket, room_id, name):
-    print("client")
-    pool: Redis = await aioredis.from_url(REDIS_URL, encoding="utf-8", decode_responses=True)
+    print('listen_client')
+    pool: Redis = await get_pool()
 
     stream_key = f'{room_id}_stream'
     while pool:
@@ -94,8 +86,6 @@ async def listen_client(websocket: WebSocket, room_id, name):
         match json_message.get('type', None):
             case 'message':
                 message = Message(user=name, text=json_message["text"], time=datetime.now())
-                await pool.xadd(name=stream_key, fields={'message': message.to_json()})
+                await pool.xadd(name=stream_key, fields={'message': message.to_json(ensure_ascii=False)})
             case _:
                 await websocket.send('Неверный тип запроса')
-
-    return 'Ok'
