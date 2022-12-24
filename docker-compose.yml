@@ -4,9 +4,7 @@ services:
       redis:
         image: 'redis:latest'
         container_name: 'redis_chat'
-
         ports:
-          - 6379:6379
-
+          - "6379:6379"
         environment:
           - ALLOW_EMPTY_PASSWORD=yes

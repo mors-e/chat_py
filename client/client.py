@@ -2,6 +2,7 @@ import json
 import asyncio
 import websockets
 
+
 WS_URL = 'ws://localhost:8000/room'
 
 

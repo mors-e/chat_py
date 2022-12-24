@@ -2,19 +2,22 @@ import asyncio
 from typing import Union
 from datetime import datetime
 
+import aioredis
+from aioredis import Redis
 from fastapi import FastAPI, WebSocket
 from starlette.websockets import WebSocketDisconnect
 
 from common.structures import Message
-from server.redis import get_redis_pool
 from server.manager import ConnectionManager
 
+
+REDIS_URL = 'redis://localhost:6379'
 
 app = FastAPI()
 manager = ConnectionManager()
 
 
-@app.websocket("room/{room_id}")
+@app.websocket("/room/{room_id}")
 async def room(
         websocket: WebSocket,
         room_id: str,
@@ -37,7 +40,8 @@ async def room(
 
 
 async def client_login(websocket: WebSocket, room_id: str, name: str) -> bool:
-    pool = await get_redis_pool()
+    print("login")
+    pool: Redis = await aioredis.from_url(REDIS_URL, decode_responses=True)
     if pool is None:
         return False
 
@@ -53,10 +57,11 @@ async def client_login(websocket: WebSocket, room_id: str, name: str) -> bool:
 
 
 async def listen_room(websocket: WebSocket, room_id):
-    pool = await get_redis_pool()
+    print("room")
+    pool: Redis = await aioredis.from_url(REDIS_URL, decode_responses=True)
 
     while pool:
-        messages = await pool.xread(streams=[room_id], latest_ids=['$'])
+        messages = await pool.xread(streams={room_id: '$'})
         message = messages.get_message()
         await websocket.send(message.get('data', '{}'))
 
@@ -64,14 +69,15 @@ async def listen_room(websocket: WebSocket, room_id):
 
 
 async def listen_client(websocket: WebSocket, room_id, name):
-    pool = await get_redis_pool()
+    print("client")
+    pool: Redis = await aioredis.from_url(REDIS_URL, decode_responses=True)
 
     while pool:
         json_message = await websocket.receive_json()
         match json_message.get('type', None):
             case 'message':
                 message = Message(user=name, text=json_message["text"], time=datetime.now())
-                pool.xadd(stream=room_id, fields=message.to_json())
+                await pool.xadd(name=room_id, fields=message.to_json())
             case _:
                 await websocket.send('Неверный тип запроса')
 
