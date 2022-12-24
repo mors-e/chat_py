@@ -1,116 +1,78 @@
-import websockets
 import asyncio
-import aioredis
-import json
+from typing import Union
 from datetime import datetime
 
-from common.messages import MessageRequest, OkResponse, ErrResponse
-from common.redis_structures import Room, Message
+from fastapi import FastAPI, WebSocket
+from starlette.websockets import WebSocketDisconnect
 
-from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
-from aioredis.errors import ConnectionClosedError as ServerConnectionClosedError
+from common.structures import Message
+from server.redis import get_redis_pool
+from server.manager import ConnectionManager
 
 
-async def get_redis_pool():
+app = FastAPI()
+manager = ConnectionManager()
+
+
+@app.websocket("room/{room_id}")
+async def room(
+        websocket: WebSocket,
+        room_id: str,
+        name: Union[str, None] = None
+) -> None:
+    await manager.connect(websocket)
+
     try:
-        pool = await aioredis.create_redis_pool(
-            ('localhost', '6379'), encoding='utf-8')
-        return pool
-    except ConnectionRefusedError as e:
-        print('cannot connect to redis on:', 'localhost', '6379')
-        return None
+        logged_in = await client_login(websocket, room_id, name)
+        if logged_in:
+            client_finished, room_finished = await asyncio.gather(
+                listen_client(websocket, room_id, name),
+                listen_room(websocket, room_id)
+            )
+            print(client_finished, room_finished)
+
+    except WebSocketDisconnect:
+        await manager.disconnect(websocket)
+        await manager.broadcast(f'Client disconnected {name}')
 
 
-async def client_login(socket, path):
+async def client_login(websocket: WebSocket, room_id: str, name: str) -> bool:
     pool = await get_redis_pool()
     if pool is None:
-        return
+        return False
 
-    splitted_path = path.split('?')
-    room_name = splitted_path.pop(0).replace('/', '')
-    name = splitted_path.pop(0).split('=').pop(1)
-
-    users = await pool.smembers(room_name)
+    users = await pool.smembers(room_id)
 
     if name in users:
-        await socket.send(ErrResponse(error='пользователь уже в комнате').to_json(ensure_ascii=False))
-        return None, None
+        await manager.send_personal_message('Пользователь с таким именем уже находится в этой комнате.', websocket)
+        return False
 
-    await pool.sadd(room_name, name)
-    await socket.send(OkResponse().to_json())
-    return name, room_name
-
-
-async def new_client_connect(client_socket: websockets.WebSocketClientProtocol, path: str):
-    name, room = await client_login(client_socket, path)
-
-    if room:
-        tasks = [
-            await asyncio.create_task(listen_client(client_socket, room, name)),
-            await asyncio.create_task(listen_room(client_socket, room))
-        ]
-
-        done, pending = await asyncio.wait(tasks, return_when=asyncio.ALL_COMPLETED)
-
-        print("1 + 2")
+    await pool.sadd(room_id, name)
+    await manager.send_personal_message('Вы вошли в чат!', websocket)
+    return True
 
 
-async def listen_room(socket, room_name, name):
+async def listen_room(websocket: WebSocket, room_id):
     pool = await get_redis_pool()
-    connected = True
 
-    while connected and pool:
-        try:
-            messages = await pool.xread(streams=[room_name], latest_ids=['$'])
-            message = subscriber.get_message()
-            message = Message.from_json(message.get('data', '{}'))
-            await socket.send(message.to_json())
-        except [ConnectionClosedError, ConnectionClosedOK]:
-            fields = {
-                'msg': '',
-                'type': 'message',
-                'room': room_name
-            }
-            await pool.xadd(stream=room_name, fields=fields, message_id=b'*', max_len=1000)
-            ws_connected = False
+    while pool:
+        messages = await pool.xread(streams=[room_id], latest_ids=['$'])
+        message = messages.get_message()
+        await websocket.send(message.get('data', '{}'))
 
-        except ServerConnectionClosedError:
-            print('redis server connection closed')
-            return
-
-        except ConnectionRefusedError:
-            print('redis server connection closed')
-            return
+    return 'Ok'
 
 
-async def listen_client(socket, room_name, name):
-    publisher = redis_room
-    print('2')
-    try:
-        while True:
-            raw_message = await socket.recv()
-            json_message = json.loads(raw_message)
-            match json_message.get('type', None):
-                case 'message':
-                    message = MessageRequest.from_json(raw_message)
-                    redis_message = Message(user=name, text=message.text, time=datetime.now())
-                    _ = publisher.publish(room_name, redis_message.to_json())
-                    await socket.send(redis_message.to_json())
-                case _:
-                    await socket.send('неверный тип запроса')
-    finally:
-        room = redis_room.get(room_name)
-        room = Room.from_json(room)
-        room.users.remove(name)
-        _ = redis_room.set(room.name, room.to_json())
+async def listen_client(websocket: WebSocket, room_id, name):
+    pool = await get_redis_pool()
 
+    while pool:
+        json_message = await websocket.receive_json()
+        match json_message.get('type', None):
+            case 'message':
+                message = Message(user=name, text=json_message["text"], time=datetime.now())
+                pool.xadd(stream=room_id, fields=message.to_json())
+            case _:
+                await websocket.send('Неверный тип запроса')
 
-async def start_server():
-    await websockets.serve(new_client_connect, "localhost", 9090)
-
-
-if __name__ == "__main__":
-    event_loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(event_loop)
-    event_loop.run_until_complete(start_server())
-    event_loop.run_forever()
+    return 'Ok'

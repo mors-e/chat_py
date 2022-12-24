@@ -1,10 +1,8 @@
-import websockets
-import asyncio
 import json
+import asyncio
+import websockets
 
-from common.messages import MessageRequest
-
-WS_URL = 'ws://localhost:9090'
+WS_URL = 'ws://localhost:8000/room'
 
 
 async def connect(url):
@@ -36,8 +34,7 @@ async def main():
         await socket.send(json.dumps(data))
         raw_response = await socket.recv()
         response = json.loads(raw_response)
-
-        print(response.get('text'))
+        print(response)
 
 
 if __name__ == "__main__":
