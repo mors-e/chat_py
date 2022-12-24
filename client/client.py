@@ -19,8 +19,8 @@ async def connect(url):
 
 
 async def main():
-    room_name = '123'
-    name = 'rb_client1234'
+    room_name = input('Введите комнату: ')
+    name = input('Введите имя: ')
     socket = await connect(f'{WS_URL}/{room_name}?name={name}')
 
     ok = await socket.recv()
