@@ -65,7 +65,7 @@ async def listen_room(websocket: WebSocket, room_id):
     pool: Redis = await get_pool()
 
     stream_key = f'{room_id}_stream'
-    index = 0
+    index = '0-0'
     while pool:
         response = await pool.xread(streams={stream_key: index})
         for _stream_name, messages in response:
@@ -83,9 +83,8 @@ async def listen_client(websocket: WebSocket, room_id, name):
     stream_key = f'{room_id}_stream'
     while pool:
         json_message = await websocket.receive_json()
-        match json_message.get('type', None):
-            case 'message':
-                message = Message(user=name, text=json_message["text"], time=datetime.now())
-                await pool.xadd(name=stream_key, fields={'message': message.to_json(ensure_ascii=False)})
-            case _:
-                await websocket.send('Неверный тип запроса')
+        if json_message.get('text', None):
+            message = Message(user=name, text=json_message["text"], time=datetime.now())
+            await pool.xadd(name=stream_key, fields={'message': message.to_json(ensure_ascii=False)})
+        else:
+            await websocket.send('Неверный тип запроса')

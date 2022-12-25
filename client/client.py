@@ -1,8 +1,12 @@
 import json
 import asyncio
+from datetime import datetime
 
 import aioconsole
 import websockets
+from common.structures import Message
+
+
 
 
 WS_URL = 'ws://localhost:8000/room'
@@ -23,14 +27,15 @@ async def listen_room(ws):
         await aioconsole.aprint(json_data)
 
 
-async def listen_input(ws):
+async def listen_input(ws, user):
     while True:
         text = await aioconsole.ainput()
 
-        message = json.dumps({
-            'type': 'message',
-            'text': text
-        })
+        message = Message(
+            text=text,
+            time=datetime.now(),
+            user=user,
+        ).to_json(ensure_ascii=False)
 
         await ws.send(message)
 
@@ -43,7 +48,7 @@ async def main():
 
     await asyncio.gather(
         listen_room(websocket),
-        listen_input(websocket),
+        listen_input(websocket, name),
     )
 
 
