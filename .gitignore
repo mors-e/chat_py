@@ -1,9 +1,10 @@
 /env*/
+/venv*/
 /.idea
+.vscode/
+.venv/
 
+__pycache__/
 pycache/
 *.py[cod]
 *$py.class
-
-.vscode/
-.venv/

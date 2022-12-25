@@ -2,7 +2,7 @@ import asyncio
 from typing import Union
 from datetime import datetime
 
-from aioredis import Redis
+from redis.asyncio.client import Redis
 from fastapi import FastAPI, WebSocket, WebSocketException
 
 from common.structures import Message
@@ -84,7 +84,7 @@ async def listen_client(websocket: WebSocket, room_id, name):
     while pool:
         json_message = await websocket.receive_json()
         if json_message.get('text', None):
-            message = Message(user=name, text=json_message["text"], time=datetime.now())
+            message = Message(user=name, text=json_message['text'], time=datetime.now())
             await pool.xadd(name=stream_key, fields={'message': message.to_json(ensure_ascii=False)})
         else:
-            await websocket.send('Неверный тип запроса')
+            await websocket.send_text('Неверный тип запроса')
