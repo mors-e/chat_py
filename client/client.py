@@ -2,11 +2,10 @@ import json
 import asyncio
 from datetime import datetime
 
+
 import aioconsole
 import websockets
 from common.structures import Message
-
-
 
 
 WS_URL = 'ws://localhost:8000/room'
