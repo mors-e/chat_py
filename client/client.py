@@ -1,10 +1,9 @@
-import json
 import asyncio
 from datetime import datetime
 
-
 import aioconsole
 import websockets
+
 from common.structures import Message
 
 
@@ -22,8 +21,8 @@ async def connect(url):
 async def listen_room(ws):
     while True:
         raw_data = await ws.recv()
-        json_data = json.loads(raw_data)
-        await aioconsole.aprint(json_data)
+        message = Message.from_json(raw_data)
+        await aioconsole.aprint(message.to_dict())
 
 
 async def listen_input(ws, user):
